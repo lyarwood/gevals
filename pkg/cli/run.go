@@ -19,12 +19,26 @@ func NewEvalCmd() *cobra.Command {
 	var outputFormat string
 	var verbose bool
 	var run string
+	var tasksetFiles []string
 
 	cmd := &cobra.Command{
 		Use:   "eval [eval-config-file]",
 		Short: "Run an evaluation",
-		Long:  `Run an evaluation using the specified eval configuration file.`,
-		Args:  cobra.ExactArgs(1),
+		Long: `Run an evaluation using the specified eval configuration file.
+
+The taskset can be specified in the eval config file, or overridden via
+the --taskset flag:
+
+  --taskset  Path to taskset file(s) (can be specified multiple times,
+             replaces eval config taskSetRefs)
+
+Examples:
+  # Run with eval config only
+  gevals eval eval.yaml
+
+  # Use standalone taskset files
+  gevals eval eval.yaml --taskset=tasks-easy.yaml --taskset=tasks-hard.yaml`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			configFile := args[0]
 
@@ -32,6 +46,30 @@ func NewEvalCmd() *cobra.Command {
 			spec, err := eval.FromFile(configFile)
 			if err != nil {
 				return fmt.Errorf("failed to load eval config: %w", err)
+			}
+
+			// Override tasksets if specified via flag
+			if len(tasksetFiles) > 0 {
+				// Get the base path from the config file for resolving relative paths
+				absConfigPath, err := filepath.Abs(configFile)
+				if err != nil {
+					return fmt.Errorf("failed to get absolute path for config: %w", err)
+				}
+				basePath := filepath.Dir(absConfigPath)
+
+				// Clear any existing taskset refs and inline tasksets
+				spec.Config.TaskSetRefs = nil
+				spec.Config.TaskSets = nil
+
+				for _, tsFile := range tasksetFiles {
+					tsPath := tsFile
+					if !filepath.IsAbs(tsPath) {
+						tsPath = filepath.Join(basePath, tsFile)
+					}
+					spec.Config.TaskSetRefs = append(spec.Config.TaskSetRefs, eval.TaskSetRef{
+						Path: tsPath,
+					})
+				}
 			}
 
 			// Create runner
@@ -70,6 +108,7 @@ func NewEvalCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&outputFormat, "output", "o", "text", "Output format (text, json)")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
 	cmd.Flags().StringVarP(&run, "run", "r", "", "Regular expression to match task names to run (unanchored, like go test -run)")
+	cmd.Flags().StringArrayVar(&tasksetFiles, "taskset", nil, "Path to taskset file (can be specified multiple times)")
 
 	return cmd
 }
