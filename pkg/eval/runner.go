@@ -13,6 +13,7 @@ import (
 	"github.com/genmcp/gevals/pkg/llmjudge"
 	"github.com/genmcp/gevals/pkg/mcpproxy"
 	"github.com/genmcp/gevals/pkg/task"
+	"github.com/genmcp/gevals/pkg/taskset"
 	"github.com/genmcp/gevals/pkg/util"
 )
 
@@ -202,38 +203,148 @@ func (r *evalRunner) RunWithProgress(ctx context.Context, taskPattern string, ca
 func (r *evalRunner) collectTaskConfigs(rx *regexp.Regexp) ([]taskConfig, error) {
 	taskConfigs := make([]taskConfig, 0)
 
-	for _, ts := range r.spec.Config.TaskSets {
-		var paths []string
-		var err error
-
-		if ts.Glob != "" {
-			paths, err = filepath.Glob(ts.Glob)
-			if err != nil {
-				return nil, fmt.Errorf("failed to glob %s: %w", ts.Glob, err)
-			}
-		} else if ts.Path != "" {
-			paths = []string{ts.Path}
+	// Process TaskSetRefs (file-based task sets)
+	for _, ref := range r.spec.Config.TaskSetRefs {
+		tsSpec, err := taskset.FromFile(ref.Path)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load task set from %s: %w", ref.Path, err)
 		}
 
-		for _, path := range paths {
-			taskSpec, err := task.FromFile(path)
+		assertions := convertTaskSetAssertions(tsSpec.Config.Assertions)
+
+		for _, taskRef := range tsSpec.Config.Tasks {
+			configs, err := r.collectTasksFromRef(rx, taskRef.Glob, taskRef.Path, assertions)
 			if err != nil {
-				return nil, fmt.Errorf("failed to load task at path %s: %w", path, err)
+				return nil, err
 			}
-
-			if !rx.MatchString(taskSpec.Metadata.Name) {
-				continue
-			}
-
-			taskConfigs = append(taskConfigs, taskConfig{
-				path:       path,
-				spec:       taskSpec,
-				assertions: ts.Assertions,
-			})
+			taskConfigs = append(taskConfigs, configs...)
 		}
 	}
 
+	// Process inline TaskSets (for backward compatibility)
+	for _, ts := range r.spec.Config.TaskSets {
+		configs, err := r.collectTasksFromRef(rx, ts.Glob, ts.Path, ts.Assertions)
+		if err != nil {
+			return nil, err
+		}
+		taskConfigs = append(taskConfigs, configs...)
+	}
+
 	return taskConfigs, nil
+}
+
+// collectTasksFromRef collects tasks from a glob pattern or path with the given assertions
+func (r *evalRunner) collectTasksFromRef(rx *regexp.Regexp, glob, path string, assertions *TaskAssertions) ([]taskConfig, error) {
+	var paths []string
+	var err error
+
+	if glob != "" {
+		paths, err = filepath.Glob(glob)
+		if err != nil {
+			return nil, fmt.Errorf("failed to glob %s: %w", glob, err)
+		}
+	} else if path != "" {
+		paths = []string{path}
+	}
+
+	taskConfigs := make([]taskConfig, 0, len(paths))
+	for _, p := range paths {
+		taskSpec, err := task.FromFile(p)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load task at path %s: %w", p, err)
+		}
+
+		if !rx.MatchString(taskSpec.Metadata.Name) {
+			continue
+		}
+
+		taskConfigs = append(taskConfigs, taskConfig{
+			path:       p,
+			spec:       taskSpec,
+			assertions: assertions,
+		})
+	}
+
+	return taskConfigs, nil
+}
+
+// convertTaskSetAssertions converts taskset.TaskAssertions to eval.TaskAssertions
+func convertTaskSetAssertions(src *taskset.TaskAssertions) *TaskAssertions {
+	if src == nil {
+		return nil
+	}
+
+	dst := &TaskAssertions{
+		MinToolCalls:     src.MinToolCalls,
+		MaxToolCalls:     src.MaxToolCalls,
+		NoDuplicateCalls: src.NoDuplicateCalls,
+	}
+
+	// Convert tool assertions
+	for _, t := range src.ToolsUsed {
+		dst.ToolsUsed = append(dst.ToolsUsed, ToolAssertion{
+			Server:      t.Server,
+			Tool:        t.Tool,
+			ToolPattern: t.ToolPattern,
+		})
+	}
+	for _, t := range src.RequireAny {
+		dst.RequireAny = append(dst.RequireAny, ToolAssertion{
+			Server:      t.Server,
+			Tool:        t.Tool,
+			ToolPattern: t.ToolPattern,
+		})
+	}
+	for _, t := range src.ToolsNotUsed {
+		dst.ToolsNotUsed = append(dst.ToolsNotUsed, ToolAssertion{
+			Server:      t.Server,
+			Tool:        t.Tool,
+			ToolPattern: t.ToolPattern,
+		})
+	}
+
+	// Convert resource assertions
+	for _, r := range src.ResourcesRead {
+		dst.ResourcesRead = append(dst.ResourcesRead, ResourceAssertion{
+			Server:     r.Server,
+			URI:        r.URI,
+			URIPattern: r.URIPattern,
+		})
+	}
+	for _, r := range src.ResourcesNotRead {
+		dst.ResourcesNotRead = append(dst.ResourcesNotRead, ResourceAssertion{
+			Server:     r.Server,
+			URI:        r.URI,
+			URIPattern: r.URIPattern,
+		})
+	}
+
+	// Convert prompt assertions
+	for _, p := range src.PromptsUsed {
+		dst.PromptsUsed = append(dst.PromptsUsed, PromptAssertion{
+			Server:        p.Server,
+			Prompt:        p.Prompt,
+			PromptPattern: p.PromptPattern,
+		})
+	}
+	for _, p := range src.PromptsNotUsed {
+		dst.PromptsNotUsed = append(dst.PromptsNotUsed, PromptAssertion{
+			Server:        p.Server,
+			Prompt:        p.Prompt,
+			PromptPattern: p.PromptPattern,
+		})
+	}
+
+	// Convert call order assertions
+	for _, c := range src.CallOrder {
+		dst.CallOrder = append(dst.CallOrder, CallOrderAssertion{
+			Type:   c.Type,
+			Server: c.Server,
+			Name:   c.Name,
+		})
+	}
+
+	return dst
 }
 
 func (r *evalRunner) runTask(

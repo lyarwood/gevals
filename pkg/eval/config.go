@@ -45,8 +45,19 @@ type EvalConfig struct {
 	McpConfigFile string                       `json:"mcpConfigFile"`
 	LLMJudge      *llmjudge.LLMJudgeEvalConfig `json:"llmJudge"`
 
-	// Advanced mode: different assertion sets
+	// TaskSetRefs references standalone TaskSet files
+	// Use this when TaskSets are defined in separate files
+	TaskSetRefs []TaskSetRef `json:"taskSetRefs,omitempty"`
+
+	// TaskSets defines inline task sets (for backward compatibility and simple cases)
+	// Either TaskSetRefs or TaskSets can be used, but not both
 	TaskSets []TaskSet `json:"taskSets,omitempty"`
+}
+
+// TaskSetRef references a standalone TaskSet file
+type TaskSetRef struct {
+	// Path to the TaskSet configuration file
+	Path string `json:"path"`
 }
 
 // AgentRef specifies how to configure the agent
@@ -155,7 +166,14 @@ func Read(data []byte, basePath string) (*EvalSpec, error) {
 		return nil, fmt.Errorf("failed to resolve mcp config file path: %w", err)
 	}
 
-	// Resolve task set paths and globs
+	// Resolve task set ref paths
+	for i := range spec.Config.TaskSetRefs {
+		if err := resolveFilePath(&spec.Config.TaskSetRefs[i].Path, basePath); err != nil {
+			return nil, fmt.Errorf("failed to resolve task set ref path at index %d: %w", i, err)
+		}
+	}
+
+	// Resolve inline task set paths and globs
 	for i := range spec.Config.TaskSets {
 		if spec.Config.TaskSets[i].Path != "" {
 			if err := resolveFilePath(&spec.Config.TaskSets[i].Path, basePath); err != nil {

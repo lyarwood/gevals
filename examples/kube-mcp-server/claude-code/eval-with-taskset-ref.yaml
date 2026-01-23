@@ -1,0 +1,21 @@
+kind: Eval
+metadata:
+  name: "kubernetes-basic-operations-with-taskset-ref"
+config:
+  agent:
+    type: "file"
+    path: agent.yaml
+  mcpConfigFile: ../mcp-config.yaml
+  extensions:
+    kubernetes:
+      package: ../bin/kubernetes-extension
+      config:
+        kubeconfig: ~/.kube/config
+  llmJudge:
+    env:
+      baseUrlKey: JUDGE_BASE_URL
+      apiKeyKey: JUDGE_API_KEY
+      modelNameKey: JUDGE_MODEL_NAME
+  # Reference a standalone TaskSet file instead of inline taskSets
+  taskSetRefs:
+    - path: ../taskset.yaml

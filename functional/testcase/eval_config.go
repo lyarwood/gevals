@@ -98,6 +98,14 @@ func (ec *EvalConfig) TaskGlob(pattern string) *EvalConfig {
 	return ec
 }
 
+// TaskSetRef adds a reference to a standalone TaskSet file
+func (ec *EvalConfig) TaskSetRef(path string) *EvalConfig {
+	ec.spec.Config.TaskSetRefs = append(ec.spec.Config.TaskSetRefs, eval.TaskSetRef{
+		Path: path,
+	})
+	return ec
+}
+
 // Build returns the eval spec
 func (ec *EvalConfig) Build() *eval.EvalSpec {
 	return ec.spec
@@ -347,6 +355,7 @@ type (
 	EvalMetadata       = eval.EvalMetadata
 	AgentRef           = eval.AgentRef
 	TaskSet            = eval.TaskSet
+	TaskSetRef         = eval.TaskSetRef
 	TaskAssertions     = eval.TaskAssertions
 	ToolAssertion      = eval.ToolAssertion
 	ResourceAssertion  = eval.ResourceAssertion

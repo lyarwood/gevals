@@ -1,0 +1,12 @@
+kind: TaskSet
+metadata:
+  name: kubernetes-basic-taskset
+config:
+  tasks:
+    - glob: tasks/*/*.yaml
+  assertions:
+    toolsUsed:
+      - server: kubernetes
+        toolPattern: ".*"
+    minToolCalls: 1
+    maxToolCalls: 20
